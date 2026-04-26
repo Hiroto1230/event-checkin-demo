@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>イベント受付管理システム</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+</head>
+<body>
+<div class="container">
+    <div class="app">
+        <button class="btn" onclick="resetDemo()">デモリセット</button>
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('list')">来場者一覧</div>
+            <div class="tab" onclick="showTab('import')">CSV 取込</div>
+            <div class="tab" onclick="showTab('export')">CSV 出力</div>
+        </div>
+
+        <div class="panel active" id="tab-list">
+            <div class="stats-grid" id="stats"></div>
+            <div class="search-row">
+                <input type="text" id="searchInput" placeholder="名前・メール・ID・メモで検索..." oninput="renderList()">
+            </div>
+            <div class="filter-row" id="filterRow"></div>
+            <div class="table-wrap">
+                <table>
+                    <colgroup>
+                        <col class="c-ops">
+                        <col class="c-buyer">
+                        <col class="c-visitor">
+                        <col class="c-gender">
+                        <col class="c-type">
+                        <col class="c-tier">
+                        <col class="c-pay">
+                        <col class="c-dist">
+                        <col class="c-memo">
+                        <col class="c-email">
+                        <col class="c-time">
+                        <col class="c-price">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>操作</th>
+                            <th>購入者</th>
+                            <th>来場者名</th>
+                            <th>性別</th>
+                            <th>種別</th>
+                            <th>区分</th>
+                            <th>支払</th>
+                            <th>配布</th>
+                            <th>メモ</th>
+                            <th>メールアドレス</th>
+                            <th>受付時間</th>
+                            <th>金額</th>
+                        </tr>
+                    </thead>
+                    <tbody id="listBody"></tbody>
+                </table>
+            </div>
+            <button class="btn btn-primary" onclick="openAddModal()">＋ 当日登録</button>
+        </div>
+
+        <div class="panel" id="tab-import">
+            <div class="row-gap">
+                <div class="col">
+                    <div class="section-title">購入者 CSV</div>
+                    <div class="upload-zone"><label>クリックしてファイルを選択<input type="file" accept=".csv" onchange="importCSV(event,'buyer')"></label></div>
+                    <div class="result-box" id="buyerResult">購入者CSVをここに読み込みます</div>
+                </div>
+                <div class="col">
+                    <div class="section-title">来場者 CSV</div>
+                    <div class="upload-zone"><label>クリックしてファイルを選択<input type="file" accept=".csv" onchange="importCSV(event,'visitor')"></label></div>
+                    <div class="result-box" id="visitorResult">来場者CSVをここに読み込みます</div>
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-primary" onclick="loadSampleData()">サンプルデータを読み込む</button>
+                <button class="btn btn-undo" onclick="clearAll()">全データ消去</button>
+            </div>
+            <div class="hint">
+                購入者CSV: purchaseId, buyerName, email, ticketCount, purchaseType, paymentStatus, tier (VIP/一般), hasDistribution (true/false), price<br>
+                来場者CSV: visitorId, purchaseId, visitorName, kanaName, gender
+            </div>
+        </div>
+
+        <div class="panel" id="tab-export">
+            <div class="section-title">受付結果を CSV ファイルとして出力します</div>
+            <div id="exportPreview" class="result-box">一覧画面でデータを読み込んでください</div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" onclick="exportCSV()">CSV をダウンロード</button>
+                <button class="btn" onclick="previewExport()">プレビュー更新</button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- 来場者編集モーダル -->
+<div class="modal-bg" id="editModal" style="display:none">
+  <div class="modal">
+    <h3>来場者を編集</h3>
+    <div class="modal-field"><label>来場者名</label><input type="text" id="editName" placeholder="来場者名"></div>
+    <div class="modal-field">
+        <label>ふりがな</label>
+        <input type="text" id="editKanaName">
+    </div>
+    <div class="modal-field"><label>性別</label><input type="text" id="editGender" placeholder="性別（任意）"></div>
+    <hr class="modal-divider">
+    <div class="modal-field"><label>メモ</label><textarea id="editMemo" placeholder="メモ（任意）"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeEditModal()">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 未払い確認モーダル -->
+<div class="modal-bg" id="unpaidModal" style="display:none">
+  <div class="modal">
+    <h3>⚠️ 未払いの来場者です</h3>
+    <div class="modal-warn">
+      <strong id="unpaidVisitorName"></strong> さん（購入者: <strong id="unpaidBuyerName"></strong>）は<br>
+      支払状態が <strong>未払い</strong> です。受付前に支払いをご確認ください。<br />
+      金額： <strong id="unpaidPrice"></strong> 円
+    </div>
+    <div class="modal-field">
+      <label>どのように処理しますか？</label>
+      <div class="radio-group">
+        <label class="radio-label">
+          <input type="radio" name="payChoice" value="paid">
+          支払済に更新して受付する
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="payChoice" value="skip" checked>
+          支払状態はそのまま受付する
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="payChoice" value="cancel">
+          受付しない（キャンセル）
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="document.getElementById('unpaidModal').style.display='none';pendingCheckinId=null;">閉じる</button>
+      <button class="btn btn-primary" onclick="confirmUnpaidCheckin()">確定</button>
+    </div>
+  </div>
+</div>
+
+<!-- 追加登録モーダル -->
+<div class="modal-bg" id="addModal" style="display:none">
+    <div class="modal">
+        <h3>当日来場者登録</h3>
+
+        <div class="modal-field">
+            <label>名前</label>
+            <input type="text" id="addName">
+        </div>
+        <div class="modal-field">
+            <label>ふりがな</label>
+            <input type="text" id="addKanaName">
+        </div>
+        <div class="modal-field">
+            <label>性別</label>
+            <input type="text" id="addGender">
+        </div>
+
+        <!-- 区分 -->
+        <div class="modal-field">
+            <label>区分</label>
+            <div class="btn-group" id="tierGroup">
+
+            </div>
+        </div>
+
+        <!-- 支払 -->
+        <div class="modal-field">
+            <label>支払状態</label>
+            <div class="btn-group" id="paymentGroup">
+                <button class="btn toggle on" data-value="支払済">支払済</button>
+                <button class="btn toggle" data-value="未払い">未払い</button>
+            </div>
+        </div>
+
+        <!-- 配布 -->
+        <div class="modal-field">
+            <label>配布物</label>
+            <div class="btn-group" id="distGroup">
+                <button class="btn toggle on" data-value="true">あり</button>
+                <button class="btn toggle" data-value="false">なし</button>
+            </div>
+        </div>
+
+        <div class="modal-field">
+            <label>金額</label>
+            <input type="number" id="addPrice">
+        </div>
+
+        <div class="modal-field">
+            <label>メモ</label>
+            <textarea id="addMemo"></textarea>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn" onclick="closeAddModal()">キャンセル</button>
+            <button class="btn btn-primary" onclick="addVisitor()">登録</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let buyers = {}, visitors = [], activeFilter = 'all', editingVisitorId = null, pendingCheckinId = null;
+let DEMO_MODE = true;
+
+EVENT_CONFIG = {
+  tiers: ['VIP', '一般', '演者'],
+  tierColors: {
+    'VIP': '#C9A227',
+    '一般': '#A0A0A0',
+    '演者': '#185FA5'
+  }
+};
+
+function setFilter(key){activeFilter=key;buildFilterRow();renderList();}
+
+function save(){try{localStorage.setItem('ecm_buyers',JSON.stringify(buyers));localStorage.setItem('ecm_visitors',JSON.stringify(visitors));}catch(e){}}
+function load(){try{const b=localStorage.getItem('ecm_buyers');const v=localStorage.getItem('ecm_visitors');if(b)buyers=JSON.parse(b);if(v)visitors=JSON.parse(v);}catch(e){}}
+
+function showTab(t){
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',['list','import','export'][i]===t));
+  document.querySelectorAll('.panel').forEach((el,i)=>el.classList.toggle('active',['list','import','export'][i]===t));
+  if(t==='list'){renderStats();renderList();}
+  if(t==='export')previewExport();
+}
+
+function renderStats(){
+  const total=visitors.length,done=visitors.filter(v=>v.checkedIn).length;
+  const vipCount=Object.values(buyers).filter(b=>b.tier==='VIP').length;
+  document.getElementById('stats').innerHTML=`
+    <div class="stat"><div class="stat-label">来場予定</div><div class="stat-value">${total}</div></div>
+    <div class="stat"><div class="stat-label">受付済み</div><div class="stat-value" style="color:#0F6E56">${done}</div></div>
+    <div class="stat"><div class="stat-label">未受付</div><div class="stat-value" style="color:#A32D2D">${total-done}</div></div>
+    <div class="stat"><div class="stat-label">VIP購入者</div><div class="stat-value" style="color:#534AB7">${vipCount}</div></div>
+  `;
+}
+
+function passFilter(v,b){
+  if(activeFilter==='all')return true;
+  if(activeFilter==='unchk')return !v.checkedIn;
+  if(activeFilter==='general')return b.tier==='一般'||!b.tier;
+  if(activeFilter==='vip')return b.tier==='VIP';
+  if(activeFilter==='unpaid')return b.paymentStatus==='未払い';
+  if(activeFilter==='dist')return b.hasDistribution===true||b.hasDistribution==='true';
+  return true;
+}
+
+function renderList(){
+  const q=(document.getElementById('searchInput').value||'').toLowerCase();
+  const rows=visitors.filter(v=>{
+    const b=buyers[v.purchaseId]||{};
+    const qHira = toHiragana(q);
+    if(!passFilter(v,b))return false;
+    if(!q)return true;
+    return [
+      v.purchaseId,
+      v.visitorName,
+      v.kanaName,
+      v.gender,
+      v.memo,
+      b.buyerName,
+      b.email
+    ].some(s=>{
+      const str = (s || '').toLowerCase();
+      const hira = toHiragana(str);
+
+      return str.includes(q) || hira.includes(qHira);
+    });
+  });
+  const body=document.getElementById('listBody');
+  if(!rows.length){body.innerHTML=`<tr><td colspan="13"><div class="empty">該当する来場者がいません</div></td></tr>`;return;}
+  body.innerHTML=rows.map(v=>{
+    const b=buyers[v.purchaseId]||{};
+    const pt=b.purchaseType==='クラファン'
+      ?`<span class="badge badge-crowd">クラファン</span>`
+      :`<span class="badge badge-hand">${b.purchaseType||'-'}</span>`;
+    const tierBadge = getTierBadge(b.tier);
+    let pay='';
+    if(b.paymentStatus==='支払済')pay=`<span class="badge badge-paid">済</span>`;
+    else if(b.paymentStatus==='未払い')pay=`<span class="badge badge-unpaid">未</span>`;
+    else pay=`<span class="badge badge-unknown">${b.paymentStatus||'-'}</span>`;
+    const hasDist=b.hasDistribution===true||b.hasDistribution==='true';
+    const distBadge=hasDist?`<span class="badge badge-dist">あり</span>`:`<span style="color:#a0a09d;font-size:11px">-</span>`;
+    const st = v.checkedIn
+      ? `<span class="badge badge-ok">済</span>`
+      : `<span class="badge badge-ng">未</span>`;
+    const tm=v.checkInTime?new Date(v.checkInTime).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}):'';
+    const vid=v.visitorId.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const checkinOp=v.checkedIn
+      ?`<button class="btn btn-undo" onclick="uncheck('${vid}')">取消</button>`
+      :`<button class="btn btn-checkin" onclick="checkIn('${vid}')">受付</button>`;
+    const memoText=v.memo
+      ?`<span style="white-space:normal;word-break:break-all;line-height:1.5">${v.memo}</span>`
+      :`<span style="color:#a0a09d">-</span>`;
+    const priceDisplay = b.price ? Number(b.price).toLocaleString() : '-';
+    return `<tr class="${v.checkedIn ? 'checked' : ''}">
+      <td style="overflow:visible"><div class="ops-cell">${checkinOp}<button class="btn btn-sm" onclick="openEditModal('${vid}')">✏️</button></div></td>
+      <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.buyerName||'-'}</td>
+        <td style="overflow:hidden">
+            <div style="display:flex;flex-direction:column;line-height:1.2">
+            <span style="font-size:10px;color:#a0a09d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${v.kanaName || ''}
+            </span>
+            <span style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px">
+                ${v.visitorName}
+            </span>
+            </div>
+        </td>
+      <td style="color:#6b6b68;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.gender||'<span style="color:#a0a09d">-</span>'}</td>
+      <td>${pt}</td>
+      <td>${tierBadge}</td>
+      <td>${pay}</td>
+      <td>${distBadge}</td>
+      <td style="vertical-align:top;padding-top:8px;font-size:11px;color:#6b6b68;overflow:visible;white-space:normal;word-break:break-all">${memoText}</td>
+      <td style="color:#6b6b68;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.email||''}</td>
+      <td style="font-size:11px;color:#6b6b68;white-space:nowrap">${tm}</td>
+      <td>${priceDisplay}</td>
+    </tr>`;
+  }).join('');
+    }
+
+
+
+function checkIn(id){
+  const v=visitors.find(x=>x.visitorId===id);
+  if(!v)return;
+  const b=buyers[v.purchaseId]||{};
+  if(b.paymentStatus==='未払い'){
+    pendingCheckinId=id;
+    document.getElementById('unpaidVisitorName').textContent=v.visitorName;
+    document.getElementById('unpaidBuyerName').textContent = b.buyerName || v.purchaseId;
+    document.getElementById('unpaidPrice').textContent = b.price || v.purchaseId;
+    document.querySelectorAll('input[name="payChoice"]').forEach(r=>r.checked=(r.value==='skip'));
+    document.getElementById('unpaidModal').style.display='flex';
+  } else {
+    doCheckIn(id);
+  }
+}
+
+function confirmUnpaidCheckin(){
+  const choice=document.querySelector('input[name="payChoice"]:checked').value;
+  document.getElementById('unpaidModal').style.display='none';
+  if(choice==='cancel'){pendingCheckinId=null;return;}
+  if(choice==='paid'){
+    const v=visitors.find(x=>x.visitorId===pendingCheckinId);
+    if(v){const b=buyers[v.purchaseId];if(b)b.paymentStatus='支払済';}
+  }
+  doCheckIn(pendingCheckinId);
+  pendingCheckinId=null;
+}
+
+function doCheckIn(id){
+  const v=visitors.find(x=>x.visitorId===id);
+  if(v){v.checkedIn=true;v.checkInTime=new Date().toISOString();}
+  save();renderStats();renderList();
+}
+
+function uncheck(id){
+  if(!confirm('受付を取り消しますか？'))return;
+  const v=visitors.find(x=>x.visitorId===id);
+  if(v){v.checkedIn=false;v.checkInTime='';}
+  save();renderStats();renderList();
+}
+
+function openEditModal(id){
+  const v=visitors.find(x=>x.visitorId===id);if(!v)return;
+  editingVisitorId=id;
+  document.getElementById('editName').value=v.visitorName||'';
+  document.getElementById('editKanaName').value=v.kanaName||'';
+  document.getElementById('editGender').value=v.gender||'';
+  document.getElementById('editMemo').value=v.memo||'';
+  document.getElementById('editModal').style.display='flex';
+  setTimeout(()=>document.getElementById('editName').focus(),50);
+}
+function closeEditModal(){document.getElementById('editModal').style.display='none';editingVisitorId=null;}
+function saveEdit(){
+  if(!editingVisitorId)return;
+  const v=visitors.find(x=>x.visitorId===editingVisitorId);
+  if(!v){closeEditModal();return;}
+  const name=document.getElementById('editName').value.trim();
+  if(!name){alert('来場者名は必須です');return;}
+  v.visitorName=name;
+  v.kanaName=document.getElementById('editKanaName').value.trim();
+  v.gender=document.getElementById('editGender').value.trim();
+  v.memo=document.getElementById('editMemo').value.trim();
+  save();renderList();closeEditModal();
+}
+document.getElementById('editModal').addEventListener('click',function(e){if(e.target===this)closeEditModal();});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){
+    closeEditModal();
+    document.getElementById('unpaidModal').style.display='none';
+    pendingCheckinId=null;
+  }
+});
+
+function openAddModal(){
+  buildTierButtons();
+  document.getElementById('addModal').style.display='flex';
+}
+
+function closeAddModal(){
+  document.getElementById('addModal').style.display='none';
+}
+
+function generateId(prefix){
+  return prefix + Date.now();
+}
+
+function addVisitor(){
+  const name = document.getElementById('addName').value.trim();
+  if(!name){
+    alert('名前は必須');
+    return;
+  }
+
+    const purchaseId = generateId('D'); // 当日用ID
+    const tier = document.querySelector('#tierGroup .on').dataset.value;
+    const payment = document.querySelector('#paymentGroup .on').dataset.value;
+    const dist = document.querySelector('#distGroup .on').dataset.value === 'true';
+
+  const buyer = {
+    purchaseId,
+    buyerName: name,
+    email: '',
+    ticketCount: '1',
+    purchaseType: '手売り',
+    paymentStatus: payment,
+    tier: tier,
+    hasDistribution: dist,
+    memo: '',
+　  price: Number(document.getElementById('addPrice').value) || 0
+  };
+
+  const visitor = {
+    visitorId: generateId('V'),
+    purchaseId,
+    visitorName: name,
+    kanaName: document.getElementById('addKanaName').value.trim(),
+    gender: document.getElementById('addGender').value.trim(),
+    checkedIn: false,
+    checkInTime: '',
+    memo: document.getElementById('addMemo').value.trim()
+  };
+
+  buyers[purchaseId] = buyer;
+  visitors.push(visitor);
+
+  save();
+  renderStats();
+  renderList();
+  resetAddForm();
+  closeAddModal();
+}
+
+document.querySelectorAll('.btn-group').forEach(group=>{
+  group.addEventListener('click',e=>{
+    if(!e.target.classList.contains('toggle')) return;
+
+    group.querySelectorAll('.toggle').forEach(btn=>btn.classList.remove('on'));
+    e.target.classList.add('on');
+  });
+});
+
+function resetAddForm() {
+  document.getElementById('addName').value = '';
+  document.getElementById('addGender').value = '';
+  document.getElementById('addKanaName').value = '';
+  document.getElementById('addPrice').value = '';
+  document.getElementById('addMemo').value = '';
+
+  // 全部OFFにして最初の1個をONにする
+  const tierBtns = document.querySelectorAll('#tierGroup .toggle');
+  tierBtns.forEach(btn=>btn.classList.remove('on'));
+  if(tierBtns[0]) tierBtns[0].classList.add('on');
+
+  document.querySelector('#paymentGroup .toggle[data-value="支払済"]').click();
+  document.querySelector('#distGroup .toggle[data-value="true"]').click();
+}
+
+
+function buildTierButtons(){
+  const el = document.getElementById('tierGroup');
+
+  el.innerHTML = EVENT_CONFIG.tiers.map((tier,i)=>`
+    <button class="btn toggle ${i===0?'on':''}" data-value="${tier}">
+      ${tier}
+    </button>
+  `).join('');
+}
+
+function getTierBadge(tier){
+  const color = EVENT_CONFIG.tierColors[tier] || '#999';
+  return `<span class="badge" style="background:${color}22;color:${color}">
+    ${tier || '-'}
+  </span>`;
+}
+
+
+function buildFilterRow(){
+  const baseFilters = [
+    {key:'all', label:'すべて'},
+    {key:'unchk', label:'未受付'},
+    {key:'unpaid', label:'未払い'},
+  ];
+
+  const tierFilters = EVENT_CONFIG.tiers.map(t => ({
+    key: `tier_${t}`,
+    label: `${t}`
+  }));
+
+  const filters = [...baseFilters, ...tierFilters];
+
+  document.getElementById('filterRow').innerHTML = filters.map(f=>{
+    let style = '';
+
+    if(activeFilter === f.key){
+      if(f.key.startsWith('tier_')){
+        const tier = f.key.replace('tier_','');
+        const color = EVENT_CONFIG.tierColors[tier] || '#999';
+        style = `style="background:${color};color:#fff;border-color:transparent"`;
+      } else {
+        style = `style="background:#1a1a19;color:#fff;border-color:transparent"`;
+      }
+    }
+
+    return `
+      <button class="flt"
+        ${style}
+        onclick="setFilter('${f.key}')">
+        ${f.label}
+      </button>
+    `;
+  }).join('');
+}
+
+
+function passFilter(v,b){
+  if(activeFilter==='all') return true;
+  if(activeFilter==='unchk') return !v.checkedIn;
+  if(activeFilter==='unpaid') return b.paymentStatus==='未払い';
+
+  if(activeFilter.startsWith('tier_')){
+    const tier = activeFilter.replace('tier_','');
+    return b.tier === tier;
+  }
+
+  return true;
+}
+
+function toHiragana(str){
+  return (str || '').replace(/[\u30a1-\u30f6]/g, ch =>
+    String.fromCharCode(ch.charCodeAt(0) - 0x60)
+  );
+}
+
+function resetDemo() {
+    if (!confirm('デモデータをリセットしますか？')) return;
+
+    buyers = {};
+    visitors = [];
+    loadSampleData();
+}
+
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/);
+  const headers=lines[0].split(',').map(h=>h.trim());
+  return lines.slice(1).filter(l=>l.trim()).map(l=>{
+    const vals=l.split(',').map(v=>v.trim());
+    const obj={};headers.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
+  });
+}
+function importCSV(e,type){
+  const file=e.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    const rows=parseCSV(ev.target.result);
+    if(type==='buyer'){
+      rows.forEach(r=>{
+        r.hasDistribution=r.hasDistribution==='true'||r.hasDistribution==='1';
+        r.memo = ''; 
+        buyers[r.purchaseId]=r;
+      });
+      document.getElementById('buyerResult').textContent=`✓ ${rows.length}件読み込みました\n`+rows.map(r=>`  ${r.purchaseId} ${r.buyerName} [${r.tier||'一般'}]`).join('\n');
+    } else {
+      let added=0,updated=0;
+      rows.forEach(r=>{
+        r.checkedIn = false;
+        r.checkInTime = '';
+        r.memo = '';
+        const idx=visitors.findIndex(v=>v.visitorId===r.visitorId);
+        if(idx>=0){visitors[idx]={...visitors[idx],...r};updated++;}else{visitors.push(r);added++;}
+      });
+      document.getElementById('visitorResult').textContent=`✓ 追加 ${added}件 / 更新 ${updated}件\n`+rows.map(r=>`  ${r.visitorId} ${r.visitorName}`).join('\n');
+    }
+    save();renderStats();renderList();
+  };
+  reader.readAsText(file,'UTF-8');e.target.value='';
+}
+function clearAll(){
+  if(!confirm('全データを消去しますか？'))return;
+  buyers={};visitors=[];save();renderStats();renderList();
+  document.getElementById('buyerResult').textContent='消去しました';
+  document.getElementById('visitorResult').textContent='消去しました';
+}
+function loadSampleData(){
+  buyers={
+      'A001': { purchaseId: 'A001', buyerName: '山田太郎', email: 'taro@example.com', ticketCount: '3', purchaseType: 'クラファン', paymentStatus: '支払済', tier: 'VIP', hasDistribution: true, memo: '', price: '20000' },
+      'A002': { purchaseId: 'A002', buyerName: '佐藤美咲', email: 'misaki@example.com', ticketCount: '2', purchaseType: '手売り', paymentStatus: '支払済', tier: '一般', hasDistribution: false, memo: '', price: '3000' },
+      'A003': { purchaseId: 'A003', buyerName: '田中誠', email: 'makoto@example.com', ticketCount: '3', purchaseType: 'クラファン', paymentStatus: '未払い', tier: '一般', hasDistribution: true, memo: '', price: '3000' },
+      'A004': { purchaseId: 'A004', buyerName: '伊藤裕次郎', email: 'Ujiro@example.com', ticketCount: '1', purchaseType: 'クラファン', paymentStatus: '支払済', tier: '演者', hasDistribution: false, memo: '', price: '5000' },
+  };
+  visitors=[
+      { visitorId: 'V001', purchaseId: 'A001', visitorName: '山田太郎', kanaName: 'やまだたろう',gender:'男性',checkedIn:false,checkInTime:'',memo:''},
+      { visitorId: 'V002', purchaseId: 'A001', visitorName: '鈴木花子', kanaName: 'すずきはなこ', gender:'女性',checkedIn:false,checkInTime:'',memo:''},
+      { visitorId: 'V003', purchaseId: 'A001', visitorName: '同行者1', kanaName: '', gender:'',checkedIn:false,checkInTime:'',memo:''},
+      { visitorId: 'V004', purchaseId: 'A002', visitorName: '佐藤美咲', kanaName: 'さとうみさき', gender:'女性',checkedIn:true,checkInTime:'2026/04/25 12:45',memo:''},
+      { visitorId: 'V005', purchaseId: 'A002', visitorName: '同行者1', kanaName: '', gender:'',checkedIn:false,checkInTime:'',memo:''},
+      { visitorId: 'V006', purchaseId: 'A003', visitorName: '田中誠', kanaName: 'たなかまこと', gender: 'その他', checkedIn: false, checkInTime: '', memo: '' },
+      { visitorId: 'V007', purchaseId: 'A003', visitorName: '同行者1', kanaName: '', gender: '', checkedIn: false, checkInTime: '', memo: '' },
+      { visitorId: 'V008', purchaseId: 'A003', visitorName: '同行者2', kanaName: '', gender: '', checkedIn: false, checkInTime: '', memo: '' },
+      { visitorId: 'V009', purchaseId: 'A004', visitorName: '伊藤裕次郎', kanaName: 'いとうゆうじろう', gender: '男性', checkedIn: false, checkInTime: '', memo: '' },
+  ];
+  save();
+  document.getElementById('buyerResult').textContent='✓ サンプル購入者3件を読み込みました';
+  document.getElementById('visitorResult').textContent='✓ サンプル来場者6件を読み込みました';
+  renderStats();renderList();
+}
+function previewExport(){
+  if(!visitors.length){document.getElementById('exportPreview').textContent='データがありません';return;}
+    const lines = ['購入ID,購入者名,来場者名,ふりがな,性別,メール,種別,区分,支払状態,配布物,受付状態,受付時間,メモ,金額'];
+  visitors.forEach(v=>{
+    const b=buyers[v.purchaseId]||{};
+    const hasDist=b.hasDistribution===true||b.hasDistribution==='true';
+      lines.push([v.purchaseId, b.buyerName || '', v.visitorName, v.gender || '', b.email || '', b.purchaseType || '', b.tier || '一般', b.paymentStatus || '', hasDist ? 'あり' : 'なし', v.checkedIn ? '受付済' : '未受付', v.checkInTime ? new Date(v.checkInTime).toLocaleString('ja-JP') : '', v.memo || '', b.price || ''].join(','));
+  });
+  document.getElementById('exportPreview').textContent=lines.slice(0,6).join('\n')+(lines.length>6?`\n...他${lines.length-6}件`:'');
+}
+function exportCSV(){
+  if(!visitors.length){alert('データがありません');return;}
+    const lines = ['購入ID,購入者名,来場者名,ふりがな,性別,メール,種別,区分,支払状態,配布物,受付状態,受付時間,メモ,金額'];
+  visitors.forEach(v=>{
+    const b=buyers[v.purchaseId]||{};
+    const esc=s=>`"${(s||'').replace(/"/g,'""')}"`;
+    const hasDist=b.hasDistribution===true||b.hasDistribution==='true';
+      lines.push([esc(v.purchaseId), esc(b.buyerName || ''), esc(v.visitorName),v.kanaName || '', esc(v.gender || ''), esc(b.email || ''), esc(b.purchaseType || ''), esc(b.tier || '一般'), esc(b.paymentStatus || ''), esc(hasDist ? 'あり' : 'なし'), esc(v.checkedIn ? '受付済' : '未受付'), esc(v.checkInTime ? new Date(v.checkInTime).toLocaleString('ja-JP') : ''), esc(v.memo || ''), b.price].join(','));
+  });
+  const blob=new Blob(['\uFEFF'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`checkin_result_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
+}
+
+load();
+
+if (DEMO_MODE && visitors.length === 0) {
+    loadSampleData();
+}
+
+buildFilterRow();
+renderStats();
+renderList();
+</script>
+</body>
+</html>
